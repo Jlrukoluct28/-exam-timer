@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Экзамены — таймер</title>
+  <style>
+    :root{--bg:#0b1220;--card:#121b2f;--text:#e8eefc;--muted:#aab6d6;--acc:#7aa2ff;--bad:#ff6b6b;--ok:#4ade80;}
+    *{box-sizing:border-box}
+    body{margin:0;font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
+    .wrap{max-width:1000px;margin:0 auto;padding:18px}
+    h1{margin:6px 0 10px;font-size:26px}
+    .muted{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px;transform:translateZ(0)}
+    .row{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+    .name{font-weight:650}
+    .when{color:var(--muted);font-size:13px}
+    .time{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size:20px; margin-top:10px
+    }
+    .status{margin-top:8px;font-size:13px}
+    .status.ok{color:var(--ok)}
+    .status.bad{color:var(--bad)}
+    .topbar{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
+    .pill{padding:4px 10px;border-radius:999px;background:rgba(122,162,255,.14);border:1px solid rgba(122,162,255,.25);font-size:13px}
+    .barWrap{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:10px}
+    .bar{height:100%;width:0%;background:rgba(122,162,255,.75)}
+    .pulse{animation:pulse .18s ease-out}
+    @keyframes pulse{from{transform:scale(1)}50%{transform:scale(1.01)}to{transform:scale(1)}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>До экзаменов осталось</h1>
+      <span class="pill">MSK (+03:00)</span>
+      <span class="pill">Сейчас: <span id="tick">—</span></span>
+    </div>
+    <p class="muted">Текст обновляется строго по секундам, прогресс-бар двигается плавно.</p>
+    <div id="grid" class="grid"></div>
+  </div>
+
+<script>
+  // Важно: +03:00 чтобы не зависеть от таймзоны компа; парсится в timestamp через Date.parse(). [web:71]
+  const EXAMS = [
+    { key: "discrete", name: "Дискра (2 клк + экзамен)", at: "2026-01-13T09:50:00+03:00" },
+    { key: "calculus", name: "Матан (2 клк)",            at: "2026-01-17T09:50:00+03:00" },
+    { key: "c_algo",   name: "C / алгосы",              at: "2026-01-19T09:50:00+03:00" },
+    { key: "python",   name: "Python",                  at: "2026-01-24T11:30:00+03:00" },
+    { key: "linal",    name: "Линал (2 клк)",           at: "2026-01-28T09:50:00+03:00" },
+  ];
+
+  const grid = document.getElementById("grid");
+  const tickEl = document.getElementById("tick");
+
+  // Рендер карточек
+  grid.innerHTML = EXAMS.map(e => `
+    <section class="card" id="card-${e.key}">
+      <div class="row">
+        <div class="name">${e.name}</div>
+        <div class="when">${e.at.replace('T',' ').replace('+03:00',' MSK')}</div>
+      </div>
+
+      <div class="time" id="time-${e.key}">—</div>
+      <div class="barWrap"><div class="bar" id="bar-${e.key}"></div></div>
+      <div class="status" id="status-${e.key}"></div>
+    </section>
+  `).join("");
+
+  function pad2(n){ return String(n).padStart(2, "0"); }
+
+  function formatDiffSeconds(totalSec) {
+    const sign = totalSec < 0 ? -1 : 1;
+    totalSec = Math.abs(totalSec);
+
+    const days = Math.floor(totalSec / 86400); totalSec %= 86400;
+    const hrs  = Math.floor(totalSec / 3600);  totalSec %= 3600;
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+
+    return { sign, str: `${days}д ${pad2(hrs)}ч ${pad2(mins)}м ${pad2(secs)}с` };
+  }
+
+  // База для прогресс-бара: сколько оставалось при открытии страницы
+  const baseRemainingMs = new Map();
+  for (const e of EXAMS) {
+    const target = Date.parse(e.at);
+    baseRemainingMs.set(e.key, Math.max(1, target - Date.now()));
+  }
+
+  // Текст — строго по секундам
+  function updatePerSecond() {
+    const now = Date.now(); // текущее время в мс [web:54]
+    tickEl.textContent = new Date(now).toLocaleString("ru-RU");
+
+    for (const e of EXAMS) {
+      const target = Date.parse(e.at);
+      const diffMs = target - now;
+      const diffSec = Math.floor(diffMs / 1000);
+
+      const tEl = document.getElementById(`time-${e.key}`);
+      const sEl = document.getElementById(`status-${e.key}`);
+      const card = document.getElementById(`card-${e.key}`);
+
+      const { sign, str } = formatDiffSeconds(diffSec);
+      if (sign >= 0) {
+        tEl.textContent = str;
+        sEl.textContent = "Ещё не началось";
+        sEl.className = "status ok";
+      } else {
+        tEl.textContent = "-" + str;
+        sEl.textContent = "Уже прошло";
+        sEl.className = "status bad";
+      }
+
+      // пульс раз в секунду
+      card.classList.remove("pulse");
+      void card.offsetWidth;
+      card.classList.add("pulse");
+    }
+  }
+
+  // Выравниваем тик на границу следующей секунды, потом раз в 1000мс. [web:75]
+  function startAlignedSecondTicker() {
+    const delay = 1000 - (Date.now() % 1000);
+    setTimeout(() => {
+      updatePerSecond();
+      setInterval(updatePerSecond, 1000); // таймер раз в секунду [web:82][web:84]
+    }, delay);
+  }
+
+  // Прогресс-бар — плавно через requestAnimationFrame (анимации в браузере). [web:83]
+  function animateProgress() {
+    const now = Date.now();
+    for (const e of EXAMS) {
+      const target = Date.parse(e.at);
+      const remaining = target - now;
+      const base = baseRemainingMs.get(e.key);
+
+      const progress = Math.max(0, Math.min(1, 1 - (remaining / base)));
+      document.getElementById(`bar-${e.key}`).style.width = (progress * 100).toFixed(2) + "%";
+    }
+    requestAnimationFrame(animateProgress);
+  }
+
+  updatePerSecond();
+  startAlignedSecondTicker();
+  requestAnimationFrame(animateProgress);
+</script>
+</body>
+</html>
